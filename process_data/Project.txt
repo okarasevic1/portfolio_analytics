@@ -1,0 +1,63 @@
+## Section 1: Absolute Performance (The Bottom Line)
+
+This section isolates raw returns to calculate exactly how much value your stock-picking created or destroyed compared to a passive indexing strategy.
+
+* **Cumulative Return:** The total percentage change of your capital from day one to the end date.
+
+$$\text{Cumulative Return} = \prod (1 + R_t) - 1$$
+
+
+* **Jensen's Alpha ($\alpha$):** The measure of your active outperformance against the market benchmark.
+
+$$\alpha = R_p - [R_f + \beta(R_m - R_f)]$$
+
+
+
+*(For your baseline, you can simplify this to a basic nominal Alpha: $\alpha = R_{\text{portfolio}} - R_{\text{benchmark}}$).*
+* **Python Target:** Compute the final values of your cumulative growth series and subtract the benchmark's final value to find your absolute Alpha.
+
+---
+
+## Section 2: The Risk Profile (The Cost of the Ride)
+
+This section measures the structural instability and downside exposure of your portfolio, showing you the exact financial stress your capital endured.
+
+* **Annualized Volatility ($\sigma$):** The standard deviation of your daily returns, scaled to a yearly timeframe to show how violently your portfolio swings.
+
+$$\sigma_{\text{annual}} = \sigma_{\text{daily}} \times \sqrt{252}$$
+
+
+* **Maximum Drawdown (MDD):** The worst peak-to-trough decline in your equity curve before a new high is made. This reveals your true structural risk exposure.
+
+$$\text{Drawdown}_t = \frac{\text{Value}_t - \max(\text{Value}_{1:t})}{\max(\text{Value}_{1:t})}$$
+
+
+* **Python Target:** Use `.std()` on your daily returns matrix to calculate volatility. For drawdown, calculate the running maximum of your cumulative wealth using `.cummax()` to find the deepest percentage drop.
+
+---
+
+## Section 3: Efficiency (Risk-Adjusted Performance)
+
+This section determines whether your returns actually justified the risk you took, or if you were just gambling with high-volatility stocks.
+
+* **The Sharpe Ratio:** Measures your excess return per unit of total risk (volatility).
+
+$$\text{Sharpe Ratio} = \frac{R_p - R_f}{\sigma_p}$$
+
+
+* **The Sortino Ratio:** Identifies whether your volatility was "good" (upward spikes) or "bad" (downward drops). It replaces total volatility with downside semi-deviation ($\sigma_d$), penalizing only the moves that lose you money.
+
+$$\text{Sortino Ratio} = \frac{R_p - R_f}{\sigma_d}$$
+
+
+* **Python Target:** Isolate negative returns using `returns[returns < 0]` to compute the denominator for the Sortino ratio, then compare both metrics against your benchmark.
+
+---
+
+## Section 4: Architecture & Topology (The Linear Algebra View)
+
+This section strips away company names and analyzes the underlying mathematical structure of your asset allocation to evaluate diversification.
+
+* **The Correlation Matrix ($R$):** A symmetric matrix showing how closely your stocks move in tandem. If your correlations are near $1.0$, you do not have a portfolio; you have a single over-concentrated bet.
+* **Idiosyncratic vs. Systematic Risk:** Dissecting whether your losses came from general market movements (systematic) or from specific company failures due to poor stock picking (idiosyncratic).
+* **Python Target:** Execute `returns.corr()` on your dataframe and plot it using a visual heatmap. Look for values above $0.7$, which flag redundant risk exposure.

@@ -37,7 +37,7 @@ class Trading212Transactions:
                     SELECT * FROM ex_rates
                 ), added_rates AS (
                     SELECT 
-                        tr.*, ex.rates
+                        tr.*, ex.rates as rates
                     FROM temp_tr AS tr
                     JOIN ex_r AS ex
                         ON tr."Time (UTC)"::DATE = ex.Date
@@ -100,6 +100,8 @@ class Trading212Transactions:
             cl_key = 'ID'
 
             self.__set_key(tbl_name, cl_key)
+
+            
                 
         except duckdb.InvalidInputException as e:
             print(e)

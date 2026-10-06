@@ -37,7 +37,7 @@ class IBKRTransactions:
 
 
             # set primary key
-            # transactions_df = self.__set_key(transactions_df, 'ID')
+            transactions_df = self.__set_key(transactions_df, 'ID')
 
             self.con.sql('''
                 CREATE OR REPLACE TABLE ibkr_transactions AS (
@@ -46,17 +46,16 @@ class IBKRTransactions:
                 );
             ''')
 
-            # self.con.sql('''
-            #     ALTER TABLE ibkr_transactions
-            #     ADD PRIMARY KEY ("ID");
-            # ''')
+            # load 
+            self.__calculate_statement()
+                
                 
         except duckdb.InvalidInputException as e:
             print(e)
             raise duckdb.InvalidInputException
 
 
-    def calculate_statement(self):
+    def __calculate_statement(self):
 
         # check if table exists:
         check_tbl = self.con.sql('''

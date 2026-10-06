@@ -16,37 +16,21 @@ class PortfolioQueries:
             ), avg_prices AS (
                 SELECT 
                     Symbol AS ticker, 
-                    sum("Gross Amount") FILTER ("Gross Amount" < 0) OVER w AS roll_gross,
-                    sum("Net Amount") FILTER ("Net Amount" < 0) OVER w AS roll_net,
-                    sum(quantity) FILTER(quantity > 0) OVER w AS roll_shares,
-                    round(roll_gross / roll_shares, 3) AS net_avg_price,
-                    round(roll_net / roll_shares, 3) AS avg_price
+                    Description AS name,
+                    round(sum(quantity ), 4) as total_shares,
+                    round(sum("Gross Amount" * -1), 4) AS total_gross,
+                    round(sum("Net Amount" * -1), 4) AS total_net,
+                    round(sum(commission), 4) AS total_fees,
+                    round(total_gross / total_shares, 4) AS avg_price,
+                    round(total_net / total_shares, 4) AS net_avg_price,
+                    currency, 
+                    first(Date)::DATE AS appearance_date, 
+                    last(Date)::DATE AS last_transaction,
                 FROM market_transactions
-                WINDOW w AS (
-                    PARTITION BY ticker
-                    ORDER BY Date
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                )
-            ), ibkr_statement AS (
-                SELECT 
-                    mt.Symbol AS ticker,
-                    mt.Description AS name,
-                    sum(quantity) as total_shares,
-                    sum("Gross Amount" * -1) AS total_gross,
-                    sum("Net Amount" * -1) AS total_net,
-                    sum(commission) AS total_fees,
-                    last(avg_p.net_avg_price) AS net_avg_price,
-                    last(avg_p.avg_price) AS avg_price,
-                    currency,
-                    first(Date) AS appearance_date,
-                    last(Date) AS last_transaction
-                FROM market_transactions mt
-                JOIN avg_prices avg_p
-                    ON mt.Symbol = avg_p.ticker
-                GROUP BY mt.Symbol, name, currency
+                GROUP BY ticker, name, currency
             )
             SELECT *
-            FROM ibkr_statement
+            FROM avg_prices
             WHERE total_shares > 0
         );
     '''
@@ -55,50 +39,61 @@ class PortfolioQueries:
     trading_212_query_trans = '''
         CREATE OR REPLACE TABLE trading_212_statement AS (
             WITH market_transactions AS (
-                SELECT "Time (UTC)" AS Date, Ticker AS ticker, Name as name,
+                SELECT 
+                    "Time (UTC)" AS Date, 
+                    Ticker AS ticker, "Name" as name,
                     "No. of shares" AS quantity, 'Price / share' AS price,
                     "Currency (Price / share)" as exhange_currency, 
-                    round(
-                        if("Currency (Gross Total)" = 'USD',
-                            "Gross Total",
-                            "Gross Total" * rates) 
-                    ) AS gross_total,
+                    if (
+                        exhange_currency = 'USD',
+                        "Gross Total" * rates, 
+                        "Gross Total"
+                    ) AS gross_total, 
                     coalesce("Currency conversion fee" * -1, 0) as commission,
-                    round(gross_total - commission, 3) AS net_total
+                    gross_total - commission, 3 AS net_total
                 FROM trading_212_transactions
                 WHERE Action LIKE '%buy' OR Action LIKE '%sell'
                 ORDER BY Date
             ), avg_prices AS (
                 SELECT 
-                    ticker, 
-                    sum(quantity) FILTER(quantity > 0) OVER w AS roll_shares, 
-                    sum(gross_total) FILTER(gross_total > 0) OVER w AS roll_gross, 
-                    sum(net_total) FILTER(net_total > 0) OVER w AS roll_net,
-                    round(roll_gross / roll_shares, 3) as net_avg_price, 
-                    round(roll_net / roll_shares, 3) as avg_price
-                FROM market_transactions
-                WINDOW w AS (
-                    PARTITION BY ticker
-                    ORDER BY Date 
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                )
-            ), trading_212_stmnt AS (
-                SELECT 
-                    mt.ticker, name,
-                    sum(quantity) as total_shares,
-                    sum(gross_total) AS total_gross,
-                    sum(net_total) AS total_net,
-                    sum(commission) AS total_fees,
-                    last(avg_p.net_avg_price) AS net_avg_price,
-                    last(avg_p.avg_price) AS avg_price,
-                    mt.exhange_currency,
-                    first(Date)::DATE AS appearance_date,
+                    ticker, name, 
+                    round(sum(quantity), 4) AS total_shares, 
+                    round(sum(gross_total), 4) AS total_gross, 
+                    round(sum(net_total), 4) AS total_net, 
+                    sum(commission) AS total_fees, 
+                    round(total_gross / total_shares, 4) AS avg_price, 
+                    round(total_net / total_shares, 4) AS net_avg_price, 
+                    exhange_currency AS currency,
+                    first(Date)::DATE AS appearance_date, 
                     last(Date)::DATE AS last_transaction
-                FROM market_transactions mt
-                JOIN avg_prices avg_p
-                    ON mt.ticker = avg_p.ticker
-                GROUP BY mt.ticker, name, mt.exhange_currency
+                FROM market_transactions
+                GROUP BY ticker, name, exhange_currency
+            ) 
+            SELECT * FROM avg_prices
+            WHERE total_shares > 0
+        );
+    '''
+
+    combine_statements = '''
+            WITH opened_pos AS (
+                SELECT * FROM trading_212_statement
+                UNION ALL BY NAME
+                SELECT * FROM ibkr_statement
+            ), calc_tbl AS (
+                SELECT
+                    replace(ticker, '.', ' ') AS l_ticker,
+                    sum(total_shares) AS total_shares_g, 
+                    sum(total_gross) AS total_gross_g, 
+                    sum(total_net) AS total_net_g,
+                    sum(total_fees) AS total_fees_g,
+                    round(total_gross_g / total_shares_g) AS avg_price, 
+                    round(total_net_g / total_shares_g) AS net_avg_price, 
+                    currency, 
+                    first(appearance_date) AS appearance_date,
+                    last(last_transaction) AS last_transaction
+                FROM opened_pos
+                GROUP BY l_ticker, currency
+                ORDER BY total_gross_g DESC
             )
-            SELECT * FROM trading_212_stmnt
-    );
+            SELECT * FROM calc_tbl;
     '''

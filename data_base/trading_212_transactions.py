@@ -14,9 +14,9 @@ class Trading212Transactions:
         self.f_loader = LoadStoreData()
 
 
-    def __extract_transactions(self, _file_path:str):
+    def __extract_transactions(self, _file_path:str, new_name='transactions_212_1'):
 
-        p_path = self.f_loader.load_csv(_file_path, 'transactions_212_1') 
+        p_path = self.f_loader.load_csv(_file_path, new_name) 
 
         temp_transactions_df = self.con.sql(f'''
             SELECT * FROM read_parquet('{p_path}');
@@ -25,92 +25,7 @@ class Trading212Transactions:
         return temp_transactions_df
 
 
-    def __append_exch_rates(self, temp_tr:pd.DataFrame, curr:list):
-
-        curr_str = ''.join(f'{c},' for c in curr)
-        curr_str = curr_str[:-1]
-
-        # temp_tr -> pd.DataFrame type and get values directly  
-        self.con.execute(f'''
-            CREATE OR REPLACE TABLE trading_212_transactions AS (
-                WITH ex_r AS (
-                    SELECT * FROM ex_rates
-                ), added_rates AS (
-                    SELECT 
-                        tr.*, ex.rates as rates
-                    FROM temp_tr AS tr
-                    JOIN ex_r AS ex
-                        ON tr."Time (UTC)"::DATE = ex.Date
-                            AND tr."Currency (Gross Total)" = ex.currency
-                ) SELECT * FROM added_rates
-            );
-        ''').commit()
-
-    def __set_key(self, table_name:str, column_name:str): 
-
-            # check whether column contains null-values
-            values_df = self.con.sql(f'''
-                SELECT "{column_name}" as p_key FROM "{table_name}"
-            ''').to_df()
-
-            # create own ID where it is empty
-            if values_df['p_key'].isnull().any():
-                self.con.sql(f'''
-                    UPDATE "{table_name}"
-                    SET "{column_name}" = concat("Action", "Time (UTC)"::DATE, "ISIN")
-                    WHERE "{column_name}" IS NULL;
-                ''')
-
-            # alter table: set primary key
-            self.con.sql(f'''
-                ALTER TABLE "{table_name}"
-                ADD PRIMARY KEY ("{column_name}")
-            ''')
-
-
-    def load_transactions(self, file_path):
-        """
-            load all transactions from brocker into the db:
-            'trading_212' - Trading 212
-        """
-
-        try:
-
-            # load transactions from the parquet 
-            temp_transactions = self.__extract_transactions(file_path)
-
-            list_curr = temp_transactions['Currency (Gross Total)'].drop_duplicates().tolist()
-            
-            start_date = temp_transactions['Time (UTC)'].min().date()
-            end_date = temp_transactions['Time (UTC)'].max().date()
-
-            # fetch exhange rates
-            ex_rates_df = self.convert_curr.load_exchange_rates(list_curr, start_date, end_date)
-
-            self.con.sql('''
-                CREATE OR REPLACE TABLE ex_rates AS (
-                    SELECT * FROM ex_rates_df
-                ); 
-            ''')
-
-            # transform transactions table 
-            self.__append_exch_rates(temp_tr=temp_transactions, curr=list_curr)
-
-            tbl_name = 'trading_212_transactions'
-            cl_key = 'ID'
-
-            self.__set_key(tbl_name, cl_key)
-
-            
-                
-        except duckdb.InvalidInputException as e:
-            print(e)
-            raise duckdb.InvalidInputException
-
-
-    def transform_into_statement(self):
-
-        tbl_name = 'trading_212_transactions'
+    def __transform_into_statement(self):
 
         # check if table exists:
         check_tbl = self.con.sql(f'''
@@ -133,21 +48,81 @@ class Trading212Transactions:
             raise Exception
 
 
-    # def append_transactions(self, brocker, transaction_path):
+    def load_transactions(self, file_path):
+        """
+            load all transactions from brocker into the db:
+            'trading_212' - Trading 212
+        """
 
-    #     if brocker == 'ibkr':
-    #         pass
-    #     elif brocker == 'trading_212':
+        tbl_name = 'trading_212_transactions'
 
-    #         convert_curr = ConvertCurrncies(
-    #             con=self.con,
-    #             file_path=transaction_path
-    #         )
+        try:
+            # load transactions from the parquet 
+            transactions_df = self.__extract_transactions(file_path)
 
-    #         convert_curr.insert_new_transactions()
+            self.con.sql(f'''
+                CREATE OR REPLACE TABLE "{tbl_name}" AS (
+                    SELECT * FROM transactions_df
+                );
+            ''')
+
+            list_curr = transactions_df['Currency (Gross Total)'].drop_duplicates().tolist()
+            start_date = transactions_df['Time (UTC)'].min().date()
+            end_date = transactions_df['Time (UTC)'].max().date()
+            # fetch exhange rates
+            ex_rates_df = self.convert_curr.load_exchange_rates(list_curr, start_date, end_date)
+
+            self.con.sql('''
+                CREATE OR REPLACE TABLE ex_rates AS (
+                    SELECT * FROM ex_rates_df
+                ); 
+            ''')
+
+            self.__transform_into_statement()
+        
+        except duckdb.InvalidInputException as e:
+            print(e)
+            raise duckdb.InvalidInputException
+
+
+    def update_transactions(self, csv_transaction_path):
+
+        try: 
+            transactions_df = self.__extract_transactions(csv_transaction_path, 'transactions_212_2')
+
+            list_curr = transactions_df['Currency (Gross Total)'].drop_duplicates().tolist()
             
-    #         # update statement after adding new transactions 
-    #         self.transform_into_statement('trading_212')
+            start_date = transactions_df['Time (UTC)'].min().date()
+            end_date = transactions_df['Time (UTC)'].max().date()
 
-    #     else:
-    #         raise ValueError
+            # fetch exhange rates
+            ex_rates_df = self.convert_curr.load_exchange_rates(list_curr, start_date, end_date)
+
+            self.con.sql('''
+                INSERT INTO ex_rates (
+                    SELECT * FROM ex_rates_df
+                );
+            ''')
+
+            transactions_df['ID'] = np.where(
+                transactions_df['ID'].isna() == True, 
+                f'{transactions_df['Action']}{transactions_df['Time (UTC)']}{transactions_df['ISIN']}',
+                transactions_df['ID']
+            )
+
+            self.con.sql('''
+                INSERT INTO trading_212_transactions BY NAME (
+                    SELECT * FROM transactions_df
+                );
+            ''')
+            
+            self.__transform_into_statement()
+
+
+        except duckdb.InvalidInputException as e:
+            print(e)
+            raise duckdb.InvalidInputException
+
+
+
+

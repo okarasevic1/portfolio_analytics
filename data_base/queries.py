@@ -46,12 +46,15 @@ class PortfolioQueries:
                     "Currency (Price / share)" as exhange_currency, 
                     if (
                         exhange_currency = 'USD',
-                        "Gross Total" * rates, 
+                        "Gross Total" * ex_rates.rates, 
                         "Gross Total"
                     ) AS gross_total, 
                     coalesce("Currency conversion fee" * -1, 0) as commission,
-                    gross_total - commission, 3 AS net_total
+                    gross_total - commission AS net_total
                 FROM trading_212_transactions
+                JOIN ex_rates
+                    ON trading_212_transactions."Time (UTC)"::DATE = ex_rates.Date
+                        AND trading_212_transactions."Currency (Gross Total)" = ex_rates.currency
                 WHERE Action LIKE '%buy' OR Action LIKE '%sell'
                 ORDER BY Date
             ), avg_prices AS (
@@ -75,13 +78,16 @@ class PortfolioQueries:
     '''
 
     combine_statements = '''
+        CREATE OR REPLACE VIEW portfolio_statement AS (
+
             WITH opened_pos AS (
-                SELECT * FROM trading_212_statement
+                (SELECT * EXCLUDE(avg_price, net_avg_price) FROM ibkr_statement)
                 UNION ALL BY NAME
-                SELECT * FROM ibkr_statement
+                (SELECT * EXCLUDE(avg_price, net_avg_price) FROM trading_212_statement)
             ), calc_tbl AS (
                 SELECT
                     replace(ticker, '.', ' ') AS l_ticker,
+                    any_value(name) AS name,
                     sum(total_shares) AS total_shares_g, 
                     sum(total_gross) AS total_gross_g, 
                     sum(total_net) AS total_net_g,
@@ -95,5 +101,11 @@ class PortfolioQueries:
                 GROUP BY l_ticker, currency
                 ORDER BY total_gross_g DESC
             )
-            SELECT * FROM calc_tbl;
+            SELECT *,
+                round(
+                    total_gross_g / sum(total_gross_g) OVER(), 
+                    4
+                ) AS weight
+            FROM calc_tbl
+        );
     '''

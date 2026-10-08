@@ -12,49 +12,12 @@ class IBKRTransactions:
         self.f_loader = LoadStoreData()
 
 
-    def __set_key(self, transactions_df:pd.DataFrame, column_name:str):
+    def __extract_transactions(self, _file_path:str, new_name='transactions_ibkr_1'):
+    
+            p_path = self.f_loader.load_csv(_file_path, new_name) 
+            return p_path
 
-        # generate own transaction_id 
-        ids = transactions_df['Transaction Type'].map(str) + '_' + transactions_df['Date'].map(str) + '_' + transactions_df['Symbol'].map(str)
-        transactions_df[column_name] = ids
-
-        return transactions_df
-
-
-
-    def load_transactions(self, file_path_csv):
-        """
-            'ibkr' - Interactive Brockers, 
-        """
-
-        try:
-
-            p_path = self.f_loader.load_csv(file_path_csv, 'transactions_ibkr_1')
-
-            transactions_df = self.con.sql(f'''
-                SELECT * FROM read_parquet('{p_path}')
-            ''').to_df()
-
-
-            # set primary key
-            transactions_df = self.__set_key(transactions_df, 'ID')
-
-            self.con.sql('''
-                CREATE OR REPLACE TABLE ibkr_transactions AS (
-                    SELECT * FROM transactions_df
-                    ORDER BY Date
-                );
-            ''')
-
-            # load 
-            self.__calculate_statement()
-                
-                
-        except duckdb.InvalidInputException as e:
-            print(e)
-            raise duckdb.InvalidInputException
-
-
+    
     def __calculate_statement(self):
 
         # check if table exists:
@@ -75,3 +38,49 @@ class IBKRTransactions:
 
         except Exception as e:
             print(e)
+
+
+    def load_transactions(self, file_path_csv):
+        """
+            'ibkr' - Interactive Brockers, 
+        """
+
+        try:
+
+            p_path = self.__extract_transactions(file_path_csv)
+
+            self.con.sql(f'''
+                CREATE OR REPLACE TABLE ibkr_transactions AS (
+                    SELECT * FROM read_parquet('{p_path}')
+                    ORDER BY Date
+                );
+            ''')
+
+            self.__calculate_statement()
+                
+                
+        except duckdb.InvalidInputException as e:
+            print(e)
+            raise duckdb.InvalidInputException
+
+
+    def update_transactions(self, file_path_csv):
+
+        try: 
+
+            p_path = self.__extract_transactions(file_path_csv, 'transactions_ibkr_2')
+
+            self.con.sql(f'''
+                INSERT INTO ibkr_transactions BY NAME (
+                    SELECT * FROM read_parquet('{p_path}')
+                    ORDER BY Date
+                );
+            ''')
+
+            self.__calculate_statement()
+                            
+        except duckdb.InvalidInputException as e:
+            print(e)
+            raise duckdb.InvalidInputException
+            
+

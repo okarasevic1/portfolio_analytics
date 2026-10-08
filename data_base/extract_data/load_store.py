@@ -6,7 +6,7 @@ class LoadStoreData:
     f_path = '/Users/okarasevic1/Documents/PortfolioAnalyzer/data_base/file_data/'
 
 
-    def load_csv(self, file_path, name): 
+    def load_csv(self, file_path:str, name:str): 
 
         new_name = f'{self.f_path}{name}.parquet'
 

@@ -1,0 +1,3 @@
+data_base/file_data/*.csv
+__pycache__/
+__pycache__/

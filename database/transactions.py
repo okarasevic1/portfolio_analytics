@@ -1,4 +1,5 @@
 import duckdb
+import pandas as pd
 import os
 os.path.join('/Users/okarasevic1/Documents/PortfolioAnalyzer/database/')
 
@@ -84,6 +85,33 @@ class MainDB:
             self.con.sql(PortfolioQueries.combine_statements)
         except Exception as e:
             raise e
+
+
+    def pull_data(self, brocker:str='both', as_df:bool=False)-> pd.DataFrame | duckdb.DuckDBPyRelation: 
+
+        tbl_name = 'portfolio_statement' 
+
+        if brocker in ('ibkr', 'trading_212'):
+            tbl_name = 'ibkr_statement' if brocker == 'ibkr' else 'trading_212_statement'
+
+        try: 
+
+            if as_df:
+                # receive data frame and returns it 
+                stmnt_df = self.con.table(tbl_name).to_df()
+                return stmnt_df
+
+            else:
+                # returns the duck relational table
+                rel_tbl = self.con.table(tbl_name)
+                return rel_tbl
+
+        except duckdb.CatalogException as e:
+            print('No such a table;')
+            raise e
+
+
+        
 
 
 

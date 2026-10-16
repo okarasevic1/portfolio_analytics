@@ -12,75 +12,99 @@ class IBKR:
     def __init__(self):
         self.ib = IB()
 
+
     async def connect(self):
         await self.ib.connectAsync('127.0.0.1', port=7497, clientId=0)
 
 
-    async def fetchContracts(self, isins:list[str], currencies:list[str]) -> list[Contract]:
+    async def fetchContract(self, isin:str, currency:str) -> Contract:
 
-        result_list = []
+        contract = Contract(
+            secType='STK',
+            secIdType='ISIN',
+            secId=isin,
+            exchange='SMART',
+            currency=currency
+        )
 
-        for isin, currency in zip(isins, currencies):
+        details = await self.ib.reqContractDetailsAsync(contract=contract)
+        contract = details[0].contract
 
-            contract = Contract(
-                secType='STK',
-                secIdType='ISIN',
-                secId=isin,
-                exchange='SMART',
-                currency=currency
-            )
+        print(
+            f"Symbol: {contract.symbol}, "
+            f"ConId: {contract.conId}, "
+            f"Exchange: {contract.primaryExchange}, "
+            f"Currency: {contract.currency}"
+        )
 
-            details = await self.ib.reqContractDetailsAsync(contract=contract)
-            contract = details[0].contract
-
-            print(
-                f"Symbol: {contract.symbol}, "
-                f"ConId: {contract.conId}, "
-                f"Exchange: {contract.primaryExchange}, "
-                f"Currency: {contract.currency}"
-            )
-
-            result_list.append(contract)
-
-        return result_list
+        return contract
 
 
-    async def downloadPrices(self, contracts:list[Contract]):
+    async def downloadPrices(self, contract:Contract):
 
         if not self.ib.isConnected():
             self.connect()
 
-        prices_df = pd.DataFrame([])
+        bars = await self.ib.reqHistoricalDataAsync(
+            contract=contract,
+            endDateTime='',
+            durationStr='365 D',
+            barSizeSetting='1 day',
+            whatToShow='TRADES',
+            useRTH=False,
+            formatDate=1,
+            keepUpToDate=False
+        )
 
-        for contract in contracts:
-
-            bars = await self.ib.reqHistoricalDataAsync(
-                contract=contract,
-                endDateTime='',
-                durationStr='365 D',
-                barSizeSetting='1 day',
-                whatToShow='TRADES',
-                useRTH=False,
-                formatDate=1,
-                keepUpToDate=False
-            )
-
-            if len(prices_df) < 0:
-                prices_df = util.df(bars)
-                prices_df['Ticker'] = contract.symbol
-
-            else:
-
-                temp_df = util.df(bars)
-                temp_df['Ticker'] = contract.symbol
-                prices_df = pd.concat([prices_df, temp_df])
-
-        prices_df = prices_df.sort_values(by=['date', 'Ticker'])
+        prices_df = util.df(bars)
+        prices_df['Ticker'] = contract.symbol
 
         return prices_df 
 
 
+    async def fetchMany(self, instruments:list):
+
+        await self.connect()
+        
+        # request Contact Details by ISIN
+        async with asyncio.TaskGroup() as task_group:
+
+            tasks = [
+                task_group.create_task(
+                    self.fetchContract(isin, curr)
+                )
+                for isin, curr in instruments
+            ]
+
+        result_contracts = [task.result() for task in tasks]
+
+        prices_df = pd.DataFrame([])
+
+        # download Prices based on request of ContractDetails
+        async with asyncio.TaskGroup() as task_group:
+
+            prices_tasks = [
+                task_group.create_task(
+                    self.downloadPrices(contract)
+                )
+                for contract in result_contracts
+            ]
+
+        for price_task in prices_tasks:
+            if len(prices_df) <= 0:
+                prices_df = price_task.result()
+                continue
+
+            prices_df = pd.concat([prices_df, price_task.result()])
+
+
+        self.disconect()
+
+        return prices_df
+
+    
     def disconect(self):
         self.ib.disconnect()
+
 
     

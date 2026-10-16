@@ -1,17 +1,14 @@
 import pandas as pd 
 import numpy as np
 import yfinance as yf 
-from yfinance.lookup import Lookup
 from datetime import datetime, timedelta
-from difflib import SequenceMatcher
-import time
+
 from ibkr_handler import IBKR
 import asyncio
 
-class Prices:
+class PricesManager:
 
-    async def fetch_prices(self, tickers:list[str], isins:list[str], 
-                     currencies:list[str], 
+    def fetch_prices(self, instruments:list, 
                      start_date=None, end_date=None, 
                      interval=182
                     ):
@@ -41,35 +38,28 @@ class Prices:
             if end_date > t_date:
                 end_date = t_date
 
+        tickers = []
+        isins = []
+        currencies = []
+
+        for instrument in instruments:
+
+            tickers.append(instrument[0])
+            isins.append(instrument[1])
+            currencies.append(instrument[2])
+
 
         prices_df = yf.download(tickers, start_date, end_date)
-        handle, m_isins, m_currenicies = self.check_nulls(tickers, prices_df, isins, currencies)
+        handle, missed_instruments = self.check_nulls(tickers, prices_df, isins, currencies)
 
         if handle:
-            handled_df = await self.handle_missing_equities(m_isins, m_currenicies)
+            handled_df = self.handle_missing_equities(missed_instruments)
+
             print(handled_df)
 
         prices_df_long = prices_df.stack(level=1, future_stack=True).reset_index()
 
         return prices_df
-
-
-    async def handle_missing_equities(self, m_isins:list[str], m_currencies:list[str]):
-
-        ib = IBKR()
-        await ib.connect()
-
-        if ib.ib.isConnected():
-            print('Connection established!')
-
-
-            try:
-                contracts = await ib.fetchContracts(m_isins, m_currencies)
-                handled_prices_df = await ib.downloadPrices(contracts) # hardcoded time range, to test the functionality
-            finally:
-                ib.disconect()
-
-        return handled_prices_df
 
     
     def check_nulls(self, tickers:list[str], prices_df:pd.DataFrame, isins:list[str], currencies:list[str]):
@@ -80,18 +70,25 @@ class Prices:
 
         handle = False
 
-        start_date = prices_df.index.min()
-        end_date = prices_df.index.max()
-
-        result_isins = []
-        result_currencies = []
+        result_instruments = []
 
         for ticker, isin, currency  in zip(tickers, isins, currencies):
 
             if not prices_df['Close', ticker].notna().all():
-                result_isins.append(isin)
-                result_currencies.append(result_currencies)
+                result_instruments.append((isin, currency))
                 handle = True
 
-        return handle, result_currencies, result_isins
+        return handle, result_instruments
+
+
+    def handle_missing_equities(self, instruments:list):
+
+        ib = IBKR()
+
+        try:
+            handled_prices_df = asyncio.run(ib.fetchMany(instruments))
+            return handled_prices_df
+        except Exception as e:
+            print(e)            
+
 

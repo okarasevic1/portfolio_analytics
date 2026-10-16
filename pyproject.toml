@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portfolio-analytics"
+version = "0.1.0"
+description = "Financial transaction processing and portfolio risk analytics for IBKR and Trading 212."
+readme = "process_data/Project.txt"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "pyarrow>=12.0.0", # Required for reading/writing .parquet files found in your database
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "jupyter",
+]
+
+# --- Custom Application Configuration ---
+[tool.portfolio]
+base_currency = "USD"
+default_file_format = "parquet"
+
+[tool.portfolio.paths]
+database_dir = "database"
+file_data_dir = "database/file_data"
+prices_dir = "prices"
+process_data_dir = "process_data"
+
+[tool.portfolio.files]
+t212_parquet = "transactions_212.parquet"
+ibkr_parquet = "transactions_ibkr.parquet"
+final_statement = "process_data/section_four/final_stmnt.csv"
+portfolio_3 = "process_data/section_three/portfolio_3.csv"
+
+[tool.setuptools.packages.find]
+include = ["prices*", "database*", "process_data*"]

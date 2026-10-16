@@ -1,97 +1,86 @@
-from ib_async import *
-import pandas as pd
+from ib_async import IB, Contract, util
 import asyncio
 
 
-async def main(ib:IB):
-
-    contract_quotes = {
-        'FUSD' : ['LSEETF', 'USD', '271826693'],
-        'TDIV' : ['LSE', 'USD', '350073445']
-    }
-
-    df = pd.DataFrame({})
-
-    for sym, spec in contract_quotes.items():
-
-        contract = Stock(
-            symbol=sym,
-            exchange=spec[0],
-            currency=spec[1]
-        )
-
-        contract.conId= spec[2]
-
-        await ib.qualifyContractsAsync(contract)
-
-        bars = await ib.reqHistoricalDataAsync(
-            contract=contract, 
-            endDateTime='',
-            durationStr='5 Y',
-            barSizeSetting='1 day',
-            whatToShow='Trades',
-            useRTH=False
-        )
-
-        if len(df) < 0:
-            df = util.df(bars)
-
-            df = df.rename({
-                    'date':'date'.capitalize(),
-                    'open':'open'.capitalize(),
-                    'high':'high'.capitalize(),
-                    'low':'low'.capitalize(),
-                    'close':'close'.capitalize(),
-                    'volume':'volume'.capitalize(),
-                }, axis=1)
-
-            df['Ticker'] = sym
-            df.set_index(keys='Date', inplace=True)
-
-        else: 
-            prices_df = util.df(bars)
-            
-            prices_df = prices_df.rename({
-                    'date':'date'.capitalize(),
-                    'open':'open'.capitalize(),
-                    'high':'high'.capitalize(),
-                    'low':'low'.capitalize(),
-                    'close':'close'.capitalize(),
-                    'volume':'volume'.capitalize(),
-                }, axis=1)
-
-            prices_df['Ticker'] = sym
-            prices_df.set_index(keys='Date', inplace=True)
-
-            df = pd.concat([df, prices_df])
-
-    print(df)
-
-    ib.disconnect()
-
-
-async def contract_details(ib:IB):
-
+async def contract_details(ib, isin):
     contract = Contract(
-        secType='STK',
-        secIdType='ISIN',
-        secId='NL0011683594',
-        exchange='SMART'
+        secType="STK",
+        secIdType="ISIN",
+        secId=isin,
+        exchange="SMART"
     )
 
     details = await ib.reqContractDetailsAsync(contract)
-    print(details)
+
+    if not details:
+        raise ValueError(f"No contract found for ISIN: {isin}")
+
+    print(f"Found {len(details)} contracts:")
+
+    for d in details:
+        c = d.contract
+        print(
+            f"Symbol: {c.symbol}, "
+            f"ConId: {c.conId}, "
+            f"Exchange: {c.primaryExchange}, "
+            f"Currency: {c.currency}"
+        )
+
+    return details
+
+
+
+async def main(ib, details):
+
+    contract = details[0].contract
+
+    bars = await ib.reqHistoricalDataAsync(
+        contract,
+        endDateTime="",
+        durationStr="1 Y",
+        barSizeSetting="1 day",
+        whatToShow="TRADES",
+        useRTH=True,
+        formatDate=1
+    )
+
+    if not bars:
+        print(f"No historical prices found for {contract.symbol}")
+        return None
+
+    df = util.df(bars)
+
+    df["symbol"] = contract.symbol
+    df["conId"] = contract.conId
+    df["currency"] = contract.currency
+
+    return df
 
 
 async def MAIN():
     ib = IB()
-    await ib.connectAsync("127.0.0.1", 7497, clientId=10)
+
+    await ib.connectAsync(
+        "127.0.0.1",
+        7497,
+        clientId=10,
+        readonly=True
+    )
 
     try:
-        details = await contract_details(ib)
-        prices = await main(ib)
+        details = await contract_details(
+            ib,
+            "US91324P1021"
+        )
+
+        prices = await main(ib, details)
+
+        if prices is not None:
+            print(prices)
+
     finally:
         ib.disconnect()
 
 
-asyncio.run(MAIN())
+if __name__ == "__main__":
+    asyncio.run(MAIN())

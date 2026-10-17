@@ -1,7 +1,7 @@
 import pandas as pd
 import asyncio 
 from ib_async import *
-
+from datetime import datetime
 
 class IBKR:
 
@@ -9,7 +9,9 @@ class IBKR:
         IBKR API Async wrapper for handling missing values
     '''
 
-    def __init__(self):
+    def __init__(self, end_date, interval):
+        self.end_date = end_date
+        self.interval = interval
         self.ib = IB()
 
 
@@ -45,10 +47,12 @@ class IBKR:
         if not self.ib.isConnected():
             self.connect()
 
+        ib_date = self.ibkr_date_format(self.end_date)
+
         bars = await self.ib.reqHistoricalDataAsync(
             contract=contract,
-            endDateTime='',
-            durationStr='365 D',
+            endDateTime=ib_date,
+            durationStr=f'{self.interval} D',
             barSizeSetting='1 day',
             whatToShow='TRADES',
             useRTH=False,
@@ -59,12 +63,31 @@ class IBKR:
         prices_df = util.df(bars)
         prices_df['Ticker'] = contract.symbol
 
+        # preprocess dataframe for future concatenation
+        prices_df = prices_df.drop(['barCount', 'average'], axis=1)
+
+        prices_df = prices_df.rename({
+                'date':'Date',
+                'open':'Open',
+                'high':'High',
+                'low':'Low',
+                'close':'Close',
+                'volume':'Volume'
+            }, axis=1
+        )
+
         return prices_df 
 
 
     async def fetchMany(self, instruments:list):
+        '''
+            Fetch async contracts and their prices
+        '''
 
-        await self.connect()
+        try:
+            await self.connect()
+        except ConnectionError:
+            raise ConnectionError('Open TWS or try to connect again')
         
         # request Contact Details by ISIN
         async with asyncio.TaskGroup() as task_group:
@@ -101,6 +124,11 @@ class IBKR:
         self.disconect()
 
         return prices_df
+
+
+    def ibkr_date_format(self, date:str):
+        dt = datetime.strptime(date, "%Y-%m-%d")
+        return dt.strftime("%Y%m%d-23:59:59")
 
     
     def disconect(self):

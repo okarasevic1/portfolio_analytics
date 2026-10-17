@@ -109,3 +109,35 @@ class PortfolioQueries:
             FROM calc_tbl
         );
     '''
+
+    snapshot_instruments = '''
+        WITH tickers AS(
+            SELECT l_ticker AS ticker 
+            FROM portfolio_statement
+        ), 
+        trading_212_snap AS (
+            SELECT 
+                tickers.ticker, ISIN, "Currency (Price / share)" AS currency
+            FROM tickers
+            INNER JOIN trading_212_transactions
+                ON tickers.ticker = trading_212_transactions.Ticker
+            GROUP BY ALL
+        ), 
+        ibkr_snap AS (
+            SELECT 
+                tickers.ticker, NULL as ISIN, "Price Currency" AS currency
+            FROM tickers 
+            INNER JOIN ibkr_transactions
+                ON tickers.ticker = ibkr_transactions.Symbol 
+            WHERE ibkr_transactions."Price Currency" <> '-'
+            GROUP BY ALL
+        ), 
+        snap AS (
+            SELECT * FROM trading_212_snap
+            WHERE ISIN IS NOT NULL
+            UNION ALL BY NAME 
+            SELECT * FROM ibkr_snap
+            WHERE currency IS NOT NULL
+        ) 
+        SELECT * FROM snap WHERE ISIN IS NOT NULL;
+    '''

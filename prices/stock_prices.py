@@ -2,9 +2,9 @@ import pandas as pd
 import numpy as np
 import yfinance as yf 
 from datetime import datetime, timedelta
-
-from ibkr_handler import IBKR
+from .ibkr_handler import IBKR
 import asyncio
+
 
 class PricesManager:
 
@@ -51,15 +51,24 @@ class PricesManager:
 
         prices_df = yf.download(tickers, start_date, end_date)
         handle, missed_instruments = self.check_nulls(tickers, prices_df, isins, currencies)
-
-        if handle:
-            handled_df = self.handle_missing_equities(missed_instruments)
-
-            print(handled_df)
-
+        # drop columns with null values and transform it into long-table
+        prices_df = prices_df.dropna(axis=1)
         prices_df_long = prices_df.stack(level=1, future_stack=True).reset_index()
 
-        return prices_df
+        if handle:
+            # calculate the interval for ibkr
+            interval = datetime.fromisoformat(end_date) - datetime.fromisoformat(start_date)
+            interval = interval.days
+            handled_df = self.handle_missing_equities(missed_instruments, end_date, interval)
+
+            prices_df_long = pd.concat([prices_df_long, handled_df]).reset_index()
+            prices_df_long = prices_df_long.drop(['index'], axis=1)
+
+        # preprocess data before DB
+        prices_df_long['Date'] = pd.to_datetime(prices_df_long['Date']).dt.date
+        prices_df_long = prices_df_long.sort_values(by='Date', ascending=False)
+
+        return prices_df_long
 
     
     def check_nulls(self, tickers:list[str], prices_df:pd.DataFrame, isins:list[str], currencies:list[str]):
@@ -81,14 +90,14 @@ class PricesManager:
         return handle, result_instruments
 
 
-    def handle_missing_equities(self, instruments:list):
+    def handle_missing_equities(self, instruments:list, end_date, interval):
 
-        ib = IBKR()
+        ib = IBKR(end_date, interval)
 
         try:
             handled_prices_df = asyncio.run(ib.fetchMany(instruments))
             return handled_prices_df
         except Exception as e:
-            print(e)            
-
+            print(e)
+            raise e    
 
